@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>صورتك بتتحرك ✨</title>
+<script src="https://cdn.jsdelivr.net/npm/aframe@1.5.0/dist/aframe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#111; font-family: system-ui, "Segoe UI", Tahoma, sans-serif; }
+  #start {
+    position:fixed; inset:0; z-index:10; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:18px; padding:24px; text-align:center;
+    background:linear-gradient(160deg,#1d1b3a,#3b1f4a); color:#fff;
+  }
+  #start h1 { font-size:26px; margin:0; }
+  #start p { font-size:16px; opacity:.85; margin:0; line-height:1.7; }
+  .btn {
+    border:0; border-radius:999px; padding:16px 38px; font-size:20px; font-weight:700;
+    background:#ffcc33; color:#222; box-shadow:0 6px 20px rgba(0,0,0,.35); cursor:pointer;
+  }
+  #hint {
+    position:fixed; bottom:28px; left:50%; transform:translateX(-50%); z-index:5;
+    background:rgba(0,0,0,.6); color:#fff; padding:10px 18px; border-radius:999px;
+    font-size:15px; display:none; white-space:nowrap;
+  }
+  #sound {
+    position:fixed; top:16px; left:16px; z-index:5; display:none;
+    border:0; border-radius:999px; padding:10px 16px; font-size:16px;
+    background:rgba(255,255,255,.9); color:#222;
+  }
+  #error { color:#ff8a8a; display:none; }
+</style>
+</head>
+<body>
+
+<div id="start">
+  <h1>✨ صورتك بتتحرك</h1>
+  <p>اضغط ابدأ، اسمح بالكاميرا،<br>ووجّه الموبايل على صورة المغناطيس</p>
+  <button class="btn" id="go">ابدأ ▶</button>
+  <p id="error"></p>
+</div>
+
+<div id="hint">📷 وجّه الكاميرا على الصورة</div>
+<button id="sound">🔇 شغّل الصوت</button>
+
+<script>
+  // اللينك بيبقى بالشكل ده:  .../?id=اسم-الفولدر
+  const params = new URLSearchParams(location.search);
+  const id = (params.get('id') || 'demo').replace(/[^a-zA-Z0-9_-]/g, '');
+  const base = 'customers/' + id + '/';
+  const errorBox = document.getElementById('error');
+
+  function showError(msg) { errorBox.textContent = msg; errorBox.style.display = 'block'; }
+
+  document.getElementById('go').addEventListener('click', async () => {
+    // نتأكد إن ملفات الزبون موجودة
+    try {
+      const r = await fetch(base + 'target.mind', { method: 'HEAD' });
+      if (!r.ok) throw 0;
+    } catch (e) { showError('مش لاقي ملفات الكود ده: ' + id); return; }
+
+    // تجهيز الفيديو داخل ضغطة الزرار (عشان الموبايل يسمح بالتشغيل)
+    const vid = document.createElement('video');
+    vid.id = 'vid';
+    vid.src = base + 'video.mp4';
+    vid.setAttribute('playsinline', '');
+    vid.setAttribute('webkit-playsinline', '');
+    vid.setAttribute('crossorigin', 'anonymous');
+    vid.loop = true;
+    vid.muted = true;
+    vid.preload = 'auto';
+    try { await vid.play(); vid.pause(); vid.currentTime = 0; } catch (e) {}
+
+    document.getElementById('start').style.display = 'none';
+    document.getElementById('hint').style.display = 'block';
+    document.getElementById('sound').style.display = 'block';
+
+    buildScene(vid);
+  });
+
+  function buildScene(vid) {
+    const scene = document.createElement('a-scene');
+    scene.setAttribute('mindar-image', `imageTargetSrc: ${base}target.mind; autoStart: true; uiScanning: no; uiLoading: yes; filterMinCF: 0.0001; filterBeta: 0.001`);
+    scene.setAttribute('color-space', 'sRGB');
+    scene.setAttribute('renderer', 'colorManagement: true, physicallyCorrectLights');
+    scene.setAttribute('vr-mode-ui', 'enabled: false');
+    scene.setAttribute('device-orientation-permission-ui', 'enabled: false');
+
+    const assets = document.createElement('a-assets');
+    assets.appendChild(vid);
+    scene.appendChild(assets);
+
+    const cam = document.createElement('a-camera');
+    cam.setAttribute('position', '0 0 0');
+    cam.setAttribute('look-controls', 'enabled: false');
+    scene.appendChild(cam);
+
+    const target = document.createElement('a-entity');
+    target.setAttribute('mindar-image-target', 'targetIndex: 0');
+
+    const plane = document.createElement('a-video');
+    plane.setAttribute('src', '#vid');
+    plane.setAttribute('width', '1');
+    plane.setAttribute('height', '1');
+    plane.setAttribute('position', '0 0 0');
+    plane.setAttribute('visible', 'false');
+    target.appendChild(plane);
+    scene.appendChild(target);
+
+    // نظبط طول الفيديو على حسب أبعاده (عرض الصورة = 1)
+    const fit = () => {
+      if (vid.videoWidth) plane.setAttribute('height', (vid.videoHeight / vid.videoWidth).toString());
+    };
+    vid.addEventListener('loadedmetadata', fit);
+    fit();
+
+    const hint = document.getElementById('hint');
+    target.addEventListener('targetFound', () => {
+      plane.setAttribute('visible', 'true');
+      hint.style.display = 'none';
+      vid.play().catch(() => {});
+    });
+    target.addEventListener('targetLost', () => {
+      plane.setAttribute('visible', 'false');
+      hint.style.display = 'block';
+      vid.pause();
+    });
+
+    document.body.appendChild(scene);
+
+    const soundBtn = document.getElementById('sound');
+    soundBtn.addEventListener('click', () => {
+      vid.muted = !vid.muted;
+      soundBtn.textContent = vid.muted ? '🔇 شغّل الصوت' : '🔊 اقفل الصوت';
+      if (plane.getAttribute('visible')) vid.play().catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
