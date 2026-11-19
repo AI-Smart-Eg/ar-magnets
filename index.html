@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>صورتك بتتحرك ✨</title>
+<title>امسح الكاميرا 📷</title>
 <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 <style>
@@ -35,7 +35,7 @@
 <body>
 
 <div id="start">
-  <h1>✨ صورتك بتتحرك</h1>
+  <h1>📷 امسح الكاميرا</h1>
   <p>اضغط ابدأ، اسمح بالكاميرا،<br>ووجّه الموبايل على صورة المغناطيس</p>
   <button class="btn" id="go">ابدأ ▶</button>
   <p id="error"></p>
@@ -50,6 +50,9 @@
   const id = (params.get('id') || 'demo').replace(/[^a-zA-Z0-9_-]/g, '');
   const base = 'customers/' + id + '/';
   const errorBox = document.getElementById('error');
+  // إعدادات الزبون (اسم ملف الفيديو) بتتحمل من الأول
+  const cfgP = fetch(base + 'config.json', { cache: 'no-store' })
+    .then(r => r.ok ? r.json() : {}).catch(() => ({}));
 
   function showError(msg) { errorBox.textContent = msg; errorBox.style.display = 'block'; }
 
@@ -63,7 +66,8 @@
     // تجهيز الفيديو داخل ضغطة الزرار (عشان الموبايل يسمح بالتشغيل)
     const vid = document.createElement('video');
     vid.id = 'vid';
-    vid.src = base + 'video.mp4';
+    const cfg = await cfgP;
+    vid.src = base + (cfg.video || 'video.mp4');
     vid.setAttribute('playsinline', '');
     vid.setAttribute('webkit-playsinline', '');
     vid.setAttribute('crossorigin', 'anonymous');

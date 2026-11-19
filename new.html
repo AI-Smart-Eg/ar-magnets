@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>امسح الكاميرا — عميل جديد</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<style>
+  body { font-family: system-ui, "Segoe UI", Tahoma, sans-serif; background:#f4f2fa; color:#222; margin:0; padding:16px; }
+  h1 { text-align:center; font-size:22px; margin:8px 0 16px; }
+  .card { background:#fff; border-radius:18px; padding:18px; max-width:560px; margin:0 auto 16px; box-shadow:0 4px 16px rgba(0,0,0,.07); }
+  h2 { font-size:17px; margin:0 0 10px; }
+  label { display:block; font-size:14px; color:#555; margin:10px 0 4px; }
+  input[type=text], input[type=password] { width:100%; box-sizing:border-box; padding:12px; font-size:16px; border:1px solid #ccc; border-radius:10px; }
+  .ltr { direction:ltr; text-align:left; }
+  button { border:0; border-radius:12px; padding:13px 20px; font-size:17px; font-weight:700; background:#5b3fd1; color:#fff; cursor:pointer; margin-top:10px; }
+  button.secondary { background:#ece8fb; color:#5b3fd1; }
+  button:disabled { background:#bbb; color:#fff; }
+  .big { width:100%; font-size:20px; padding:16px; }
+  .small { font-size:13px; color:#666; line-height:1.7; }
+  .row { display:flex; gap:10px; align-items:flex-start; flex-wrap:wrap; }
+  #photoPrev, #videoPrev { width:150px; height:225px; object-fit:cover; border-radius:10px; background:#eee; display:none; }
+  #log { white-space:pre-line; font-size:15px; line-height:1.9; margin-top:10px; }
+  #result { text-align:center; display:none; }
+  #result img { width:220px; height:220px; image-rendering:pixelated; }
+  .link { direction:ltr; word-break:break-all; font-size:14px; background:#f0eefc; padding:8px; border-radius:8px; }
+  details summary { cursor:pointer; font-weight:700; }
+  #history a { display:block; direction:ltr; text-align:left; font-size:14px; margin:4px 0; color:#5b3fd1; }
+</style>
+</head>
+<body>
+<h1>📷 امسح الكاميرا — عميل جديد</h1>
+
+<div class="card">
+  <details id="settingsBox">
+    <summary>⚙️ الإعدادات (مرة واحدة بس)</summary>
+    <label>GitHub Token</label>
+    <input type="password" id="token" class="ltr" placeholder="github_pat_...">
+    <p class="small">التوكن بيتحفظ على الجهاز ده بس. اعمله من GitHub → Settings → Developer settings → Fine-grained tokens، وخليه على Repo <b>ar-magnets</b> بس، بصلاحية <b>Contents: Read and write</b>.</p>
+    <label>الـ Repo</label>
+    <input type="text" id="repo" class="ltr" value="AI-Smart-Eg/ar-magnets">
+    <button class="secondary" id="saveSettings">حفظ</button>
+    <span id="settingsMsg" class="small"></span>
+  </details>
+</div>
+
+<div class="card">
+  <h2>1️⃣ اسم العميل</h2>
+  <input type="text" id="cname" class="ltr" placeholder="ahmed (إنجليزي)">
+  <p class="small">هيتضافله حروف عشوائية عشان محدش يخمّن اللينك.</p>
+</div>
+
+<div class="card">
+  <h2>2️⃣ الفيديو</h2>
+  <input type="file" id="videoIn" accept="video/*">
+  <p class="small">يُفضل أقل من 20 ثانية. هيتقص على مقاس المغناطيس 6×9 ويتضغط لوحده.</p>
+</div>
+
+<div class="card">
+  <h2>3️⃣ الصورة</h2>
+  <button class="secondary" id="fromVideo" disabled>📸 خد الصورة من أول الفيديو (الأفضل)</button>
+  <p class="small">أو اختار صورة تانية:</p>
+  <input type="file" id="photoIn" accept="image/*">
+  <label>مكان القص (لو الراس أو الرجلين مقصوصين حرّك ده)</label>
+  <input type="range" id="pos" min="0" max="100" value="50" style="width:100%">
+  <div class="row" style="margin-top:10px">
+    <canvas id="photoPrev" width="480" height="720"></canvas>
+  </div>
+</div>
+
+<div class="card">
+  <button class="big" id="go" disabled>🚀 جهّز وارفع</button>
+  <div id="log"></div>
+</div>
+
+<div class="card" id="result">
+  <h2>✅ جاهز!</h2>
+  <img id="qrImg" alt="QR">
+  <p class="link" id="linkTxt"></p>
+  <p class="small">الموقع بياخد دقيقة أو اتنين لحد ما الملفات تظهر.</p>
+  <button id="pdfBtn">🖨️ نزّل ملف الطباعة (PDF)</button>
+  <button class="secondary" id="qrBtn">⬇️ نزّل الـ QR بس</button>
+  <button class="secondary" id="openBtn">🔗 جرّب اللينك</button>
+</div>
+
+<div class="card">
+  <details>
+    <summary>🗂️ آخر العملاء</summary>
+    <div id="history"></div>
+  </details>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const W = 720, H = 1080;           // مقاس 6×9 (2:3)
+let videoFile = null, photoImg = null, photoSource = null;
+
+// ---------- الإعدادات ----------
+function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+$('token').value = ls('ghToken') || '';
+$('repo').value = ls('ghRepo') || 'AI-Smart-Eg/ar-magnets';
+if (!$('token').value) $('settingsBox').open = true;
+$('saveSettings').onclick = () => {
+  ls('ghToken', $('token').value.trim()); ls('ghRepo', $('repo').value.trim());
+  $('settingsMsg').textContent = ' ✅ اتحفظ';
+};
+
+// ---------- القص ----------
+function cropRect(sw, sh, pos) {
+  const target = W / H;
+  if (sw / sh > target) { const cw = sh * target; return [(sw - cw) * pos, 0, cw, sh]; }
+  const ch = sw / target; return [0, (sh - ch) * pos, sw, ch];
+}
+function drawCropped(ctx, src, sw, sh, w, h) {
+  const [x, y, cw, ch] = cropRect(sw, sh, $('pos').value / 100);
+  ctx.drawImage(src, x, y, cw, ch, 0, 0, w, h);
+}
+function renderPreview() {
+  if (!photoSource) return;
+  const c = $('photoPrev'); c.style.display = 'block';
+  drawCropped(c.getContext('2d'), photoSource.el, photoSource.w, photoSource.h, c.width, c.height);
+  checkReady();
+}
+$('pos').oninput = renderPreview;
+
+// ---------- الفيديو ----------
+function loadVideoEl(file) {
+  return new Promise((res, rej) => {
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    v.src = URL.createObjectURL(file);
+    v.onloadeddata = () => res(v);
+    v.onerror = () => rej(new Error('الفيديو ده مش بيفتح على المتصفح'));
+  });
+}
+$('videoIn').onchange = async () => {
+  videoFile = $('videoIn').files[0] || null;
+  $('fromVideo').disabled = !videoFile;
+  checkReady();
+};
+$('fromVideo').onclick = async () => {
+  try {
+    const v = await loadVideoEl(videoFile);
+    const seeked = new Promise(r => v.onseeked = r);
+    v.currentTime = 0.05;
+    await seeked;
+    photoSource = { el: v, w: v.videoWidth, h: v.videoHeight };
+    renderPreview();
+  } catch (e) { alert(e.message); }
+};
+
+// ---------- الصورة ----------
+$('photoIn').onchange = () => {
+  const f = $('photoIn').files[0]; if (!f) return;
+  const im = new Image();
+  im.onload = () => { photoSource = { el: im, w: im.naturalWidth, h: im.naturalHeight }; renderPreview(); };
+  im.src = URL.createObjectURL(f);
+};
+
+$('cname').oninput = checkReady;
+function checkReady() { $('go').disabled = !(videoFile && photoSource && $('cname').value.trim()); }
+
+// ---------- أدوات ----------
+const log = t => { $('log').textContent += t + '\n'; };
+function slug(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'client'; }
+function rand(n) { const a = 'abcdefghijkmnpqrstuvwxyz23456789'; let s = ''; const r = crypto.getRandomValues(new Uint8Array(n)); r.forEach(x => s += a[x % a.length]); return s; }
+function bufToB64(buf) { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
+const canvasBlob = (c, type, q) => new Promise(r => c.toBlob(r, type, q));
+
+// ضغط وقص الفيديو بالتسجيل من canvas
+async function processVideo(file, onProgress) {
+  const v = await loadVideoEl(file);
+  const dur = Math.min(v.duration || 20, 20);
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  const stream = c.captureStream(30);
+  // الصوت
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const srcNode = ac.createMediaElementSource(v);
+    const dest = ac.createMediaStreamDestination();
+    srcNode.connect(dest);
+    if (ac.state === 'suspended') await ac.resume();
+    dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+  } catch (e) {}
+  const types = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  const mime = types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t));
+  if (!mime) throw new Error('المتصفح ده مش بيدعم ضغط الفيديو — جرّب Chrome');
+  const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 2000000, audioBitsPerSecond: 96000 });
+  const chunks = [];
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  const done = new Promise(r => rec.onstop = r);
+  v.muted = false; v.volume = 1;
+  if (v.currentTime > 0) { const sk = new Promise(r => v.onseeked = r); v.currentTime = 0; await sk; }
+  rec.start(500);
+  try { await v.play(); } catch (e) { v.muted = true; await v.play(); }
+  await new Promise(resolve => {
+    const draw = () => {
+      drawCropped(ctx, v, v.videoWidth, v.videoHeight, W, H);
+      onProgress(Math.min(100, Math.round(v.currentTime / dur * 100)));
+      if (v.ended || v.currentTime >= dur) return resolve();
+      (v.requestVideoFrameCallback ? v.requestVideoFrameCallback.bind(v) : requestAnimationFrame)(draw);
+    };
+    draw();
+  });
+  v.pause(); rec.stop(); await done;
+  const isMp4 = mime.startsWith('video/mp4');
+  return { blob: new Blob(chunks, { type: isMp4 ? 'video/mp4' : 'video/webm' }), name: isMp4 ? 'video.mp4' : 'video.webm' };
+}
+
+async function ghPut(path, b64, msg) {
+  const repo = ls('ghRepo') || $('repo').value.trim();
+  const r = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+    method: 'PUT',
+    headers: { 'Authorization': 'Bearer ' + (ls('ghToken') || $('token').value.trim()), 'Accept': 'application/vnd.github+json' },
+    body: JSON.stringify({ message: msg, content: b64 })
+  });
+  if (!r.ok) { const t = await r.text(); throw new Error('GitHub رفض الرفع (' + r.status + '): ' + t.slice(0, 150)); }
+}
+
+function siteBase() {
+  const [owner, name] = (ls('ghRepo') || $('repo').value.trim()).split('/');
+  return `https://${owner.toLowerCase()}.github.io/${name}/`;
+}
+
+// ---------- التشغيل ----------
+let last = null;
+$('go').onclick = async () => {
+  if (!(ls('ghToken') || $('token').value.trim())) { $('settingsBox').open = true; alert('حط الـ GitHub Token في الإعدادات الأول'); return; }
+  $('go').disabled = true; $('log').textContent = ''; $('result').style.display = 'none';
+  const id = slug($('cname').value.trim()) + '-' + rand(6);
+  try {
+    // الصورة
+    log('🖼️ تجهيز الصورة...');
+    const pc = document.createElement('canvas'); pc.width = W; pc.height = H;
+    drawCropped(pc.getContext('2d'), photoSource.el, photoSource.w, photoSource.h, W, H);
+    const photoBlob = await canvasBlob(pc, 'image/jpeg', 0.92);
+
+    // ملف التتبع
+    log('🎯 تجهيز ملف التتبع (ثواني)...');
+    if (!window.MINDAR) await import('https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js');
+    const sc = document.createElement('canvas'); sc.width = 480; sc.height = 720;
+    sc.getContext('2d').drawImage(pc, 0, 0, 480, 720);
+    const small = new Image(); small.src = sc.toDataURL('image/jpeg', 0.95); await small.decode();
+    const compiler = new MINDAR.IMAGE.Compiler();
+    await compiler.compileImageTargets([small], () => {});
+    const mind = await compiler.exportData();
+
+    // الفيديو
+    log('🎬 ضغط الفيديو (بياخد نفس مدة الفيديو — سيب الصفحة مفتوحة)...');
+    const vline = $('log').textContent;
+    const vid = await processVideo(videoFile, p => { $('log').textContent = vline + '   ' + p + '%\n'; });
+    const mb = (vid.blob.size / 1048576).toFixed(1);
+    log('   حجم الفيديو: ' + mb + ' ميجا');
+
+    // الرفع
+    const dir = 'customers/' + id + '/';
+    log('☁️ رفع الصورة...');  await ghPut(dir + 'photo.jpg', bufToB64(await photoBlob.arrayBuffer()), 'New customer ' + id + ': photo');
+    log('☁️ رفع ملف التتبع...'); await ghPut(dir + 'target.mind', bufToB64(mind), 'New customer ' + id + ': target');
+    log('☁️ رفع الفيديو...'); await ghPut(dir + vid.name, bufToB64(await vid.blob.arrayBuffer()), 'New customer ' + id + ': video');
+    await ghPut(dir + 'config.json', btoa(JSON.stringify({ video: vid.name, created: new Date().toISOString() })), 'New customer ' + id + ': config');
+
+    // QR
+    const link = siteBase() + '?id=' + id;
+    const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
+    const qrUrl = qr.createDataURL(10, 4);
+    $('qrImg').src = qrUrl; $('linkTxt').textContent = link;
+    $('result').style.display = 'block';
+    log('✅ تمام!');
+    last = { id, link, qrUrl, photoUrl: pc.toDataURL('image/jpeg', 0.92) };
+
+    const hist = JSON.parse(ls('history') || '[]'); hist.unshift({ id, link, date: new Date().toLocaleDateString('ar-EG') });
+    ls('history', JSON.stringify(hist.slice(0, 50))); showHistory();
+    $('result').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    log('❌ ' + (e.message || e));
+  }
+  $('go').disabled = false;
+};
+
+// ---------- الطباعة ----------
+function qrPng(url) { // نحوّل GIF لـ PNG عشان jsPDF
+  return new Promise(r => { const im = new Image(); im.onload = () => { const c = document.createElement('canvas'); c.width = im.width; c.height = im.height; const x = c.getContext('2d'); x.imageSmoothingEnabled = false; x.drawImage(im, 0, 0); r(c.toDataURL('image/png')); }; im.src = url; });
+}
+$('pdfBtn').onclick = async () => {
+  if (!last) return;
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  pdf.addImage(last.photoUrl, 'JPEG', 15, 15, 60, 90);
+  pdf.setDrawColor(200); pdf.rect(15, 15, 60, 90);
+  pdf.addImage(await qrPng(last.qrUrl), 'PNG', 85, 15, 30, 30);
+  pdf.save('print-' + last.id + '.pdf');
+};
+$('qrBtn').onclick = async () => {
+  if (!last) return;
+  const a = document.createElement('a'); a.href = await qrPng(last.qrUrl); a.download = 'qr-' + last.id + '.png'; a.click();
+};
+$('openBtn').onclick = () => last && window.open(last.link, '_blank');
+
+function showHistory() {
+  const hist = JSON.parse(ls('history') || '[]');
+  $('history').innerHTML = hist.length ? hist.map(h => `<a href="${h.link}" target="_blank">${h.date} — ${h.id}</a>`).join('') : '<p class="small">لسه مفيش</p>';
+}
+showHistory();
+</script>
+</body>
+</html>
